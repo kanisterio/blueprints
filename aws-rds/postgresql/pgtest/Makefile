@@ -16,7 +16,7 @@
 BIN := pgtest
 
 # This repo's root import path (under GOPATH).
-PKG := github.com/kanisterio/kanister/examples/aws-rds/postgresql/pgtest
+PKG := github.com/kanisterio/blueprints/aws-rds/postgresql/pgtest
 
 # Where to push the docker image.
 REGISTRY ?= kastenio
