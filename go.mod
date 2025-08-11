@@ -1,6 +1,6 @@
 module github.com/kanisterio/blueprints
 
-go 1.24.5
+go 1.24
 
 require (
 	github.com/kanisterio/kanister v0.113.0-alpha.1
