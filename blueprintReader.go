@@ -1,4 +1,4 @@
-package blueprinthelper
+package main
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
+//go:embed **/*blueprint.yaml
 var blueprintFiles embed.FS
 
 // ReadFromFile parsed and returns Blueprint specs placed at blueprints/{app}-blueprint.yaml
