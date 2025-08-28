@@ -38,7 +38,10 @@ $ helm repo update
 
 # Install the Redis database
 $ helm install redis bitnami/redis --namespace redis-test --create-namespace \
-    --set auth.password='<redis-password>' --set volumePermissions.enabled=true
+    --set auth.password='<redis-password>' --set volumePermissions.enabled=true \
+		--set image.repository=bitnamilegacy/redis \
+  		--set global.security.allowInsecureImages=true \
+		--set volumePermissions.image.repository=bitnamilegacy/os-shell
 ```
 
 The command deploys a Redis instance in the `redis-test` namespace.

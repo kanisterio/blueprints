@@ -7,7 +7,7 @@
 This Helm chart has been developed based on [PostgreSQL](https://github.com/bitnami/charts/tree/master/bitnami/postgresql) chart but including some changes to guarantee high availability such as:
 
 - A new deployment, service have been added to deploy [Pgpool-II](https://pgpool.net/mediawiki/index.php/Main_Page) to act as proxy for PostgreSQL backend. It helps to reduce connection overhead, acts as a load balancer for PostgreSQL, and ensures database node failover.
-- Replacing `bitnami/postgresql` with `bitnami/postgresql-repmgr` which includes and configures repmgr. Repmgr ensures standby nodes assume the primary role when the primary node is unhealthy.
+- Replacing `bitnamilegacy/postgresql` with `bitnamilegacy/postgresql-repmgr` which includes and configures repmgr. Repmgr ensures standby nodes assume the primary role when the primary node is unhealthy.
 
 ## Requirements
 When restoring the postgreSQL with high availability in a different namespace, the standby instance pod goes into `CrashLoopBackOff` since the connection info for the primary/secondary nodes in the `repmgr` database points to source namespace. The blueprint `postgres-ha-hook.yaml` can be used to solve this issue which will update the `repmgr` database with correct connection information for primary and secondary instances
@@ -31,7 +31,10 @@ $ helm repo add bitnami https://charts.bitnami.com/bitnami
 $ helm repo update
 
 $ kubectl create ns postgres-ha-test
-$ helm install my-release --namespace postgres-ha-test bitnami/postgresql-ha
+$ helm install my-release --namespace postgres-ha-test bitnami/postgresql-ha \
+    --set image.repository=bitnamilegacy/postgresql-ha \
+    --set global.security.allowInsecureImages=true \
+    --set volumePermissions.image.repository=bitnamilegacy/os-shell
 ```
 
 The command deploys PostgreSQL HA on the Kubernetes cluster in the default configuration.
