@@ -98,7 +98,10 @@ To install the PostgreSQL chart with the release name `my-release` and default c
 $ helm repo add bitnami https://charts.bitnami.com/bitnami
 $ helm repo update
 
-$ helm install my-release --create-namespace --namespace postgres-test bitnami/postgresql
+$ helm install my-release --create-namespace --namespace postgres-test bitnami/postgresql \
+  --set image.repository=bitnamilegacy/postgresql \
+  --set global.security.allowInsecureImages=true \
+  --set volumePermissions.image.repository=bitnamilegacy/os-shell
 ```
 
 > **Tip**: List all releases using `helm list`
@@ -150,7 +153,7 @@ Once Postgres is running, you can populate it with some data. Let's add a table 
 ```bash
 $ export POSTGRES_PASSWORD=$(kubectl get secret --namespace postgres-test my-release-postgresql -o jsonpath="{.data.postgres-password}" | base64 -d)
 
-$ kubectl run my-release-postgresql-client --rm --tty -i --restart='Never' --namespace postgres-test --image docker.io/bitnami/postgresql:15.1.0-debian-11-r31 --env="PGPASSWORD=$POSTGRES_PASSWORD" \
+$ kubectl run my-release-postgresql-client --rm --tty -i --restart='Never' --namespace postgres-test --image docker.io/bitnamilegacy/postgresql:17.6.0 --env="PGPASSWORD=$POSTGRES_PASSWORD" \
       --command -- psql --host my-release-postgresql -U postgres -d postgres -p 5432
 
 postgres=# 
@@ -243,7 +246,7 @@ To verify, Connect to the RDS PostgreSQL database instance using the command men
 In this command `<instance-name>`, `<db-password>`, and `<master-username>` are the details of the RDS instance that we have already created as part of [setup](#create-rds-instance-on-aws)
 
 ```bash
-$ kubectl run my-release-postgresql-client --rm --tty -i --restart='Never' --namespace postgres-test --image docker.io/bitnami/postgresql:15.1.0-debian-11-r31 --env="PGPASSWORD=<db-password>" --command -- psql --host <instance-name> -U <master-username> -d template1 -p 5432                   
+$ kubectl run my-release-postgresql-client --rm --tty -i --restart='Never' --namespace postgres-test --image docker.io/bitnamilegacy/postgresql:17.6.0 --env="PGPASSWORD=<db-password>" --command -- psql --host <instance-name> -U <master-username> -d template1 -p 5432                   
 
 psql (15.1, server 15.2)
 SSL connection (protocol: TLSv1.2, cipher: ECDHE-RSA-AES256-GCM-SHA384, compression: off)
