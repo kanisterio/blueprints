@@ -10,7 +10,7 @@ This chart bootstraps a single node MySQL deployment on a [Kubernetes](http://ku
 
 - Kubernetes 1.20+
 - PV provisioner support in the underlying infrastructure
-- Kanister controller version 0.114.0 installed in your cluster, let's assume in Namespace `kanister`
+- Kanister controller version 0.115.0 installed in your cluster, let's assume in Namespace `kanister`
 - Kanctl CLI installed (https://docs.kanister.io/tooling.html#install-the-tools)
 
 ## Installing the Chart
@@ -27,7 +27,10 @@ $ helm repo update
 # Install the MySQL database
 $ kubectl create namespace mysql-test
 $ helm install mysql-release bitnami/mysql --namespace mysql-test \
-    --set auth.rootPassword='<mysql-root-password>'
+    --set auth.rootPassword='<mysql-root-password>' \
+	--set image.repository=bitnamilegacy/mysql \
+	--set global.security.allowInsecureImages=true \
+	--set volumePermissions.image.repository=bitnamilegacy/os-shell
 ```
 
 The command deploys a MySQL instance in the `mysql-test` namespace.

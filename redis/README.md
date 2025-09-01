@@ -11,7 +11,7 @@ We will be using [Redis](https://github.com/bitnami/charts/tree/main/bitnami/red
 
 - Kubernetes 1.20+
 - PV provisioner support in the underlying infrastructure
-- Kanister controller version 0.114.0 installed in your cluster, let's assume in Namespace `kanister`
+- Kanister controller version 0.115.0 installed in your cluster, let's assume in Namespace `kanister`
 - Kanctl CLI installed (https://docs.kanister.io/tooling.html#install-the-tools)
 - Docker CLI installed
 - A docker image containing the required tools to back up Redis. The Dockerfile for the image can be found [here](https://raw.githubusercontent.com/kanisterio/kanister/master/docker/redis-tools/Dockerfile). To build and push the docker image to your docker registry, execute [these](#build-docker-image) steps.
@@ -38,7 +38,10 @@ $ helm repo update
 
 # Install the Redis database
 $ helm install redis bitnami/redis --namespace redis-test --create-namespace \
-    --set auth.password='<redis-password>' --set volumePermissions.enabled=true
+    --set auth.password='<redis-password>' --set volumePermissions.enabled=true \
+		--set image.repository=bitnamilegacy/redis \
+  		--set global.security.allowInsecureImages=true \
+		--set volumePermissions.image.repository=bitnamilegacy/os-shell
 ```
 
 The command deploys a Redis instance in the `redis-test` namespace.
