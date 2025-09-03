@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"log"
 	"path"
 	"strings"
 
@@ -28,6 +29,7 @@ func parseBlueprint(data []byte) (*crv1alpha1.Blueprint, error) {
 // ReadFromFile reads a blueprint from the embedded filesystem
 func ReadFromFile(appName string) (*crv1alpha1.Blueprint, error) {
 	blueprintPath := fmt.Sprintf("%s/%s-blueprint.yaml", appName, appName)
+	log.Printf("Reading blueprint from path: %s", blueprintPath)
 
 	data, err := embeddedBlueprints.ReadFile(blueprintPath)
 	if err != nil {

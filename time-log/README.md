@@ -9,7 +9,7 @@ Note: This application is used in the Kanister tutorial, for a detailed walkthro
 The following command deploys the example Time Log application in `default` namespace:
 ```bash
 # Create a deployment whose log we'll ship to s3
-$ kubectl apply -f ./examples/time-log/time-logger-deployment.yaml
+$ kubectl apply -f ./time-log/time-logger-deployment.yaml
 deployment "time-logger" created
 ```
 
@@ -22,15 +22,15 @@ Next create a Blueprint which describes how backup and restore actions can be ex
 $ echo -n "YOUR_KEY" | base64
 
 # Create secrets containing the necessary AWS credentials
-$ kubectl apply -f examples/time-log/secrets.yaml
+$ kubectl apply -f time-log/secrets.yaml
 secret "aws-creds" created
 
 # Create a profile that will dictate where the backup is stored
-$ kubectl apply -f examples/time-log/s3-profile.yaml
+$ kubectl apply -f time-log/s3-profile.yaml
 profile "s3-profile" created
 
 # Create the kanister blueprint that has instructions on how to backup the log
-$ kubectl apply -f examples/time-log/blueprint.yaml
+$ kubectl apply -f time-log/time-log-blueprint.yaml
 blueprint "time-log-bp" created
 
 ```
@@ -38,7 +38,7 @@ blueprint "time-log-bp" created
 You can now take a backup of Time Log's data using an ActionSet defining backup for this application. Create an ActionSet in the same namespace as the controller.
 ```
 # Create the actionset that causes the controller to kick off the backup
-$ kubectl --namespace kanister create -f examples/time-log/backup-actionset.yaml
+$ kubectl --namespace kanister create -f time-log/backup-actionset.yaml
 actionset "s3backup-f4c4q" created
 
 # View the status of the actionset
