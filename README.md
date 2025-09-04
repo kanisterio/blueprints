@@ -1,6 +1,6 @@
 # Kanister Blueprints
 
-This repository contains a comprehensive collection of [Kanister](https://kanister.io) blueprints for protecting various applications and databases running on Kubernetes. Kanister is a framework that enables application-specific data management operations on Kubernetes clusters.
+This repository provides a curated set of [Kanister](https://kanister.io) blueprints to help protect a variety of applications and databases on Kubernetes. These examples are designed to make experimenting with Kanister easier.
 
 ## 🚀 What are Kanister Blueprints?
 
@@ -12,7 +12,6 @@ Blueprints are custom resources that define how to perform data operations (back
 - [Kanister controller](https://docs.kanister.io/install.html) version 0.114.0+ installed in your cluster
 - [Kanctl CLI](https://docs.kanister.io/tooling.html#install-the-tools) installed
 - Helm for deploying applications
-- Object storage (S3, GCS, Azure Blob, etc.) for storing backups
 
 ## 🎯 Getting Started
 
@@ -44,12 +43,6 @@ If you're new to Kanister, we recommend starting with the **[time-log](./time-lo
 
 If you have any questions or run into issues, feel free to reach out to us on
 [Slack](https://kanisterio.slack.com).
-
-## Contributing
-
-We welcome contributions! If you’d like to improve these examples or add new ones:
-- Open an issue or submit a pull request.
-- Follow the contribution guidelines in the main Kanister repository.
 
 ## License
 
