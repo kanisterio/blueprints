@@ -1,4 +1,4 @@
-module github.com/kanisterio/kanister/examples/aws-rds/postgresql/pgtest
+module github.com/kanisterio/blueprints/aws-rds-postgres/pgtest
 
 go 1.17
 

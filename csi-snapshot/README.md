@@ -21,7 +21,7 @@ Install Time-Logger application.
 $ kubectl create namespace time-log
 
 # Create the Deployment and PersistentVolumeClaim in time-log namespace
-$ kubectl -n time-log create -f ./examples/time-log/time-logger-deployment.yaml
+$ kubectl -n time-log create -f ./time-log/time-logger-deployment.yaml
 
 # Run a shell inside time-logger deployment's pod
 $ kubectl exec -it $(kubectl get pods -n time-log -l app=time-logger -o=jsonpath='{.items[0].metadata.name}') -n time-log -- /bin/bash
@@ -37,10 +37,10 @@ Sun Jan 23 08:54:39 UTC 2022
 
 Create the Blueprint in `kanister` namespace
 
-> **Note**:  This example uses a Kubernetes cluster on DigitalOcean. Therefore the `snapshotClass` and `storageClass` in the following `./examples/csi-snapshot/csi-snapshot-blueprint.yaml` file are set to `do-block-storage`. Change the arguments appropriately before creating the blueprint.
+> **Note**:  This example uses a Kubernetes cluster on DigitalOcean. Therefore the `snapshotClass` and `storageClass` in the following `./csi-snapshot/csi-snapshot-blueprint.yaml` file are set to `do-block-storage`. Change the arguments appropriately before creating the blueprint.
 
 ```bash
-$ kubectl create -f ./examples/csi-snapshot/csi-snapshot-blueprint.yaml -n kanister
+$ kubectl create -f ./csi-snapshot/csi-snapshot-blueprint.yaml -n kanister
 ```
 
 ### Backup the application data
