@@ -4,11 +4,9 @@ go 1.24
 
 toolchain go1.24.2
 
-require (
-	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apimachinery v0.29.10
-)
-
+// Direct and indirect dependencies are in separate require sections.
+// Keep *all* direct dependencies in this section; and all indirect
+// dependencies in the require block following this one.
 require (
 	github.com/Masterminds/semver v1.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -47,8 +45,10 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/api v0.29.10 // indirect
 	k8s.io/apiextensions-apiserver v0.29.10 // indirect
+	k8s.io/apimachinery v0.29.10
 	k8s.io/client-go v0.29.10 // indirect
 	k8s.io/code-generator v0.29.10 // indirect
 	k8s.io/gengo v0.0.0-20230829151522-9cce18d56c01 // indirect
