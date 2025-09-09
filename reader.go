@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"os"
 	"path"
 	"strings"
 
@@ -40,11 +41,23 @@ func parseBlueprint(data []byte) (*crv1alpha1.Blueprint, error) {
 	return &bp, nil
 }
 
-// ReadFromFile reads a blueprint from the embedded filesystem
-func ReadFromFile(blueprintPath string) (*crv1alpha1.Blueprint, error) {
+// ReadFromEmbeddedFile reads a blueprint from the embedded filesystem
+func ReadFromEmbeddedFile(blueprintPath string) (*crv1alpha1.Blueprint, error) {
 	log.Printf("Reading blueprint from path: %s", blueprintPath)
 
 	data, err := embeddedBlueprints.ReadFile(blueprintPath)
+	if err != nil {
+		return nil, fmt.Errorf("blueprint not found on path %s: %w", blueprintPath, err)
+	}
+
+	return parseBlueprint(data)
+}
+
+// ReadFromFile parses and returns Blueprint specs
+func ReadFromFile(blueprintPath string) (*crv1alpha1.Blueprint, error) {
+	log.Printf("Reading blueprint from path: %s", blueprintPath)
+
+	data, err := os.ReadFile(blueprintPath)
 	if err != nil {
 		return nil, fmt.Errorf("blueprint not found on path %s: %w", blueprintPath, err)
 	}
