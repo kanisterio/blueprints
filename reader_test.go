@@ -37,8 +37,8 @@ func TestListBlueprints(t *testing.T) {
 	}
 }
 
-func TestReadBlueprintFromFile(t *testing.T) {
-	bp, err := ReadFromFile("mysql")
+func TestReadBlueprintFromEmbeddedFile(t *testing.T) {
+	bp, err := ReadFromEmbeddedFile("mysql/mysql-blueprint.yaml")
 	if err != nil {
 		t.Fatalf("Failed to read MySQL blueprint: %v", err)
 	}
