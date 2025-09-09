@@ -47,6 +47,7 @@ If you have any questions or run into issues, feel free to reach out to us on
 ## License
 
 Apache License 2.0. See [LICENSE](https://github.com/kanisterio/kanister/blob/master/LICENSE).
+
 ---
 
 **Note**: Each blueprint includes detailed setup instructions in its respective `README.md` file. Make sure to follow the specific requirements and configurations for your chosen application.
