@@ -32,7 +32,9 @@ $ helm repo update
 
 $ kubectl create ns postgres-ha-test
 $ helm install my-release --namespace postgres-ha-test bitnami/postgresql-ha \
-    --set image.repository=bitnamilegacy/postgresql-ha \
+    --set postgresql.image.repository=bitnamilegacy/postgresql-repmgr \
+    --set pgpool.image.repository=bitnamilegacy/pgpool \
+    --set metrics.image.repository=bitnamilegacy/postgres-exporter \
     --set global.security.allowInsecureImages=true \
     --set volumePermissions.image.repository=bitnamilegacy/os-shell
 ```
