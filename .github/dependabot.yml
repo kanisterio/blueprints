@@ -10,3 +10,26 @@ updates:
       prefix: "deps(go):"
     labels:
       - "dependencies"
+    ignore:
+      - dependency-name: "k8s.io/*"
+        # only allow patch updates
+        update-types: ["version-update:semver-major","version-update:semver-minor"]
+      - dependency-name: "sigs.k8s.io/*"
+        # only allow patch updates
+        update-types: ["version-update:semver-major","version-update:semver-minor"]
+      - dependency-name: "github.com/kanisterio/kanister"
+        update-types: ["version-update:semver-major","version-update:semver-minor"]
+    groups:
+      k8s:
+        patterns:
+        - "k8s.io/*"
+        - "sigs.k8s.io/*"
+        update-types:
+          - patch
+      golang:
+        patterns:
+        - "golang.org/x/*"
+        - "google.golang.org/*"
+      openapi:
+        patterns:
+          - "github.com/go-openapi/*"
