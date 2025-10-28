@@ -33,4 +33,4 @@ updates:
       openapi:
         patterns:
           - "github.com/go-openapi/*"
-          
+
