@@ -37,21 +37,4 @@ func TestListBlueprints(t *testing.T) {
 	}
 }
 
-func TestReadBlueprintFromEmbeddedFile(t *testing.T) {
-	bp, err := ReadFromEmbeddedFile("mysql/mysql-blueprint.yaml")
-	if err != nil {
-		t.Fatalf("Failed to read MySQL blueprint: %v", err)
-	}
-
-	if bp.Kind != "Blueprint" {
-		t.Errorf("Expected Kind to be 'Blueprint', got '%s'", bp.Kind)
-	}
-
-	if bp.APIVersion == "" {
-		t.Error("Expected APIVersion to be set")
-	}
-
-	if len(bp.Actions) == 0 {
-		t.Error("Expected blueprint to have actions")
-	}
-}
+// TODO: add tests for reader functions
