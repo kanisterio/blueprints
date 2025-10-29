@@ -15,7 +15,6 @@
 package blueprints
 
 import (
-	"bytes"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -23,26 +22,13 @@ import (
 	"os"
 	"path"
 	"strings"
-
-	crv1alpha1 "github.com/kanisterio/kanister/pkg/apis/cr/v1alpha1"
-	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
 //go:embed */*-blueprint.yaml
 var embeddedBlueprints embed.FS
 
-// parseBlueprint parses YAML data into a Blueprint struct
-func parseBlueprint(data []byte) (*crv1alpha1.Blueprint, error) {
-	var bp crv1alpha1.Blueprint
-	dec := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 1000)
-	if err := dec.Decode(&bp); err != nil {
-		return nil, err
-	}
-	return &bp, nil
-}
-
 // ReadFromEmbeddedFile reads a blueprint from the embedded filesystem
-func ReadFromEmbeddedFile(blueprintPath string) (*crv1alpha1.Blueprint, error) {
+func ReadFromEmbeddedFile(blueprintPath string) ([]byte, error) {
 	log.Printf("Reading blueprint from path: %s", blueprintPath)
 
 	data, err := embeddedBlueprints.ReadFile(blueprintPath)
@@ -50,11 +36,11 @@ func ReadFromEmbeddedFile(blueprintPath string) (*crv1alpha1.Blueprint, error) {
 		return nil, fmt.Errorf("blueprint not found on path %s: %w", blueprintPath, err)
 	}
 
-	return parseBlueprint(data)
+	return data, nil
 }
 
 // ReadFromFile parses and returns Blueprint specs
-func ReadFromFile(blueprintPath string) (*crv1alpha1.Blueprint, error) {
+func ReadFromFile(blueprintPath string) ([]byte, error) {
 	log.Printf("Reading blueprint from path: %s", blueprintPath)
 
 	data, err := os.ReadFile(blueprintPath)
@@ -62,7 +48,7 @@ func ReadFromFile(blueprintPath string) (*crv1alpha1.Blueprint, error) {
 		return nil, fmt.Errorf("blueprint not found on path %s: %w", blueprintPath, err)
 	}
 
-	return parseBlueprint(data)
+	return data, nil
 }
 
 // ListBlueprints returns a list of all embedded blueprints
