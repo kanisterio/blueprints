@@ -4,7 +4,7 @@ package utils
 import "fmt"
 
 // GetBlueprintPath constructs the path to the blueprint file based on app and blueprint names
-func GetBlueprintPath(app string, blueprintName string) string {
+func GetBlueprintPathByName(app string, blueprintName string) string {
 	var blueprintFolder string
 
 	// If blueprintName is not provided, use app name as blueprint name
