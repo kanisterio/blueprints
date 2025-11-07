@@ -3,7 +3,7 @@ package utils
 
 import "fmt"
 
-// GetBlueprintPath constructs the path to the blueprint file based on app and blueprint names
+// GetBlueprintPathByName constructs the path to the blueprint file based on app and blueprint names
 func GetBlueprintPathByName(app string, blueprintName string) string {
 	var blueprintFolder string
 
