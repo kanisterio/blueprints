@@ -13,15 +13,15 @@ func GetBlueprintPathByName(app string, blueprintName string) string {
 	}
 
 	switch app {
-	case KanisterAppRDSAuroraSnap:
-		blueprintFolder = BPFolderNameAWSRDSAuroraMySQL
-	case KanisterAppRDSPostgresSnap, KanisterAppRDSPostgres, KanisterAppRDSPostgresDump:
-		blueprintFolder = BPFolderNameAWSRDSPostgres
-	case KanisterAppKafka:
-		blueprintFolder = BPFolderNameKafkaAdobeS3Connector
+	case kanisterAppRDSAuroraSnap:
+		blueprintFolder = bpFolderNameAWSRDSAuroraMySQL
+	case kanisterAppRDSPostgresSnap, kanisterAppRDSPostgres, kanisterAppRDSPostgresDump:
+		blueprintFolder = bpFolderNameAWSRDSPostgres
+	case kanisterAppKafka:
+		blueprintFolder = bpFolderNameKafkaAdobeS3Connector
 	default:
 		blueprintFolder = blueprintName
 	}
 
-	return fmt.Sprintf("%s/%s-blueprint.yaml", blueprintFolder, blueprintName)
+	return fmt.Sprintf(blueprintPathFormat, blueprintFolder, blueprintName)
 }
