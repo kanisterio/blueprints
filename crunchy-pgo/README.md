@@ -13,7 +13,7 @@ Backup data is stored in the pgBackRest repository configured on the `PostgresCl
 
 ## Prerequisites
 
-- Kubernetes 1.25+
+- Kubernetes 1.28+
 - PV provisioner support in the underlying infrastructure
 - PGO v5.x installed in your cluster
 - Kanister controller version 0.118.0 installed in your cluster, let's assume in Namespace `kanister`
