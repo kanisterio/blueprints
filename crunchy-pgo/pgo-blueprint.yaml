@@ -1,0 +1,209 @@
+apiVersion: cr.kanister.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: pgo-blueprint
+actions:
+  backup:
+    outputArtifacts:
+      backupInfo:
+        keyValue:
+          pgoBackupRepo: '{{ .Phases.pgoBackup.Output.pgoBackupRepo }}'
+          pgoBackupTimestamp: '{{ .Phases.getTimelineInfo.Output.pgoBackupTimestamp }}'
+          pgoBackupTimelineID: '{{ .Phases.getTimelineInfo.Output.pgoBackupTimelineID }}'
+    phases:
+      # Trigger a one-off pgBackRest manual backup via annotation, then wait for
+      # PGO to pick it up and report which repo is used.
+      - func: KubeTask
+        name: pgoBackup
+        args:
+          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.119.0
+          command:
+            - bash
+            - -o
+            - errexit
+            - -o
+            - pipefail
+            - -c
+            - |-
+              # Check if manual backups are enabled
+              manual_backups=$(kubectl get postgrescluster {{ .Object.metadata.name }} -n {{ .Object.metadata.namespace }} -ojsonpath="{.spec.backups.pgbackrest.manual}")
+              if [ -z "$manual_backups" ] ; then
+                  >&2 echo 'Manual backups are not enabled. Make sure that "spec.backups.pgbackrest.manual" config is set PostgresCluster resource'
+                  exit 1
+              fi
+
+              # Add backup annotation to trigger manual backup
+              startTimestamp=$(date -u --rfc-3339=seconds)
+              kubectl annotate -n {{ .Object.metadata.namespace }} postgrescluster {{ .Object.metadata.name }} postgres-operator.crunchydata.com/pgbackrest-backup="$startTimestamp" --overwrite
+
+              # Wait until PGO picks up this backup request. From then on,
+              # status.pgbackrest.manualBackup describes this backup, not an older one.
+              backup_id=""
+              counter=0
+              while [ "$backup_id" != "$startTimestamp" ] && [ $counter -lt 120 ]; do
+                  sleep 5
+                  backup_id=$(kubectl get postgrescluster {{ .Object.metadata.name }} -n {{ .Object.metadata.namespace }} -ojsonpath="{.status.pgbackrest.manualBackup.id}")
+                  let "counter=$counter+1"
+              done
+              if [ "$backup_id" != "$startTimestamp" ]; then
+                  >&2 echo 'PGO did not start the backup. Make sure that manual backups "spec.backups.pgbackrest.manual" are enabled on PostgresCluster resource'
+                  exit 1
+              fi
+
+              # Find backup repo
+              backup_repo=$(kubectl get postgrescluster {{ .Object.metadata.name }} -n {{ .Object.metadata.namespace }} -ojsonpath="{.spec.backups.pgbackrest.manual.repoName}")
+              kando output pgoBackupRepo $backup_repo
+      # Wait for the backup to finish. Success is checked in the next phase, so a
+      # failed backup doesn't hang until the timeout.
+      - func: WaitV2
+        name: waitForBackupReady
+        args:
+          timeout: 45m
+          conditions:
+            anyOf:
+              - condition: '{{ if .status.pgbackrest.manualBackup.finished }}true{{ else }}false{{ end }}'
+                objectReference:
+                  apiVersion: v1beta1
+                  group: postgres-operator.crunchydata.com
+                  resource: postgresclusters
+                  name: '{{ .Object.metadata.name }}'
+                  namespace: '{{ .Object.metadata.namespace }}'
+      - func: KubeTask
+        name: getTimelineInfo
+        args:
+          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.119.0
+          command:
+            - bash
+            - -o
+            - errexit
+            - -o
+            - pipefail
+            - -c
+            - |-
+              cluster="{{ .Object.metadata.name }}"
+              ns="{{ .Object.metadata.namespace }}"
+
+              # Fail fast if the backup finished but didn't succeed
+              succeeded=$(kubectl get postgrescluster $cluster -n $ns -ojsonpath="{.status.pgbackrest.manualBackup.succeeded}")
+              if [ -z "$succeeded" ] || [ "$succeeded" -lt 1 ]; then
+                  >&2 echo 'pgBackRest backup failed. Check the logs of the backup job created by PGO.'
+                  exit 1
+              fi
+
+              # The queries below must run on the primary
+              primary_pod=$(kubectl get pods -n $ns \
+                  -l postgres-operator.crunchydata.com/cluster=$cluster,postgres-operator.crunchydata.com/role=master \
+                  -o jsonpath='{.items[0].metadata.name}')
+              psql_exec() { kubectl exec "$primary_pod" -n $ns -c database -- psql -Atc "$1"; }
+
+              # Get current timestamp and timeline ID from postgres
+              timestamp=$(psql_exec "select current_timestamp")
+              tl_id=$(psql_exec "select timeline_id from pg_control_checkpoint()")
+
+              # Write a commit record after the target time so recovery can stop
+              # there, then switch WAL and wait until that segment is archived.
+              psql_exec "select txid_current()" > /dev/null
+              wal_file=$(psql_exec "select pg_walfile_name(pg_switch_wal())")
+              counter=0
+              until [ "$(psql_exec "select coalesce(last_archived_wal, '') collate \"C\" >= '$wal_file' from pg_stat_archiver")" = "t" ]; do
+                  if [ $counter -ge 60 ]; then
+                      >&2 echo "WAL segment $wal_file was not archived in time"
+                      exit 1
+                  fi
+                  sleep 5
+                  let "counter=$counter+1"
+              done
+
+              kando output pgoBackupTimestamp "$timestamp"
+              kando output pgoBackupTimelineID "$tl_id"
+  restore:
+    inputArtifactNames:
+      - backupInfo
+    phases:
+      # Configure pgBackRest point-in-time restore options from the backup
+      # artifact and trigger it via annotation.
+      - func: KubeTask
+        name: pgoRestore
+        args:
+          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.119.0
+          command:
+            - bash
+            - -o
+            - errexit
+            - -o
+            - pipefail
+            - -c
+            - |-
+              kubectl patch postgrescluster -n {{ .Object.metadata.namespace }} {{ .Object.metadata.name }} --type merge --patch "$(cat << 'EOM'
+              spec:
+                backups:
+                  pgbackrest:
+                    restore:
+                      enabled: true
+                      repoName: "{{ .ArtifactsIn.backupInfo.KeyValue.pgoBackupRepo }}"
+                      options:
+                      - --type=time
+                      - --target="{{ .ArtifactsIn.backupInfo.KeyValue.pgoBackupTimestamp }}"
+                      - --target-timeline="{{ .ArtifactsIn.backupInfo.KeyValue.pgoBackupTimelineID }}"
+              EOM
+              )"
+              # Trigger restore
+              restoreTimestamp=$(date -u --rfc-3339=seconds)
+              kubectl annotate postgrescluster -n {{ .Object.metadata.namespace }} {{ .Object.metadata.name }} postgres-operator.crunchydata.com/pgbackrest-restore="$restoreTimestamp" --overwrite
+
+              # Wait until PGO picks up this restore request, so an old
+              # <cluster>-pgbackrest-restore job can't be mistaken for this one.
+              restore_id=""
+              counter=0
+              while [ "$restore_id" != "$restoreTimestamp" ] && [ $counter -lt 60 ]; do
+                  sleep 5
+                  restore_id=$(kubectl get postgrescluster {{ .Object.metadata.name }} -n {{ .Object.metadata.namespace }} -ojsonpath="{.status.pgbackrest.restore.id}")
+                  let "counter=$counter+1"
+              done
+              if [ "$restore_id" != "$restoreTimestamp" ]; then
+                  >&2 echo 'PGO did not start the restore. Make sure restore is enabled on PostgresCluster resource.'
+                  exit 1
+              fi
+      # Wait for the restore to finish. Success is checked after the restore
+      # spec is disabled, so the spec is cleaned up even if the restore failed.
+      - func: WaitV2
+        name: waitForRestoreSuccess
+        args:
+          timeout: 45m
+          conditions:
+            anyOf:
+              - condition: '{{ if .status.pgbackrest.restore.finished }}true{{ else }}false{{ end }}'
+                objectReference:
+                  apiVersion: v1beta1
+                  group: postgres-operator.crunchydata.com
+                  resource: postgresclusters
+                  name: '{{ .Object.metadata.name }}'
+                  namespace: '{{ .Object.metadata.namespace }}'
+      # Disable the restore spec again so a future backup annotation doesn't
+      # re-trigger the same restore.
+      - func: KubeTask
+        name: pgoRestoreDisable
+        args:
+          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.119.0
+          command:
+            - bash
+            - -o
+            - errexit
+            - -o
+            - pipefail
+            - -c
+            - |-
+              kubectl patch postgrescluster -n {{ .Object.metadata.namespace }} {{ .Object.metadata.name }} --type merge --patch "$(cat << 'EOM'
+              spec:
+                backups:
+                  pgbackrest:
+                    restore:
+                      enabled: false
+              EOM
+              )"
+
+              succeeded=$(kubectl get postgrescluster {{ .Object.metadata.name }} -n {{ .Object.metadata.namespace }} -ojsonpath="{.status.pgbackrest.restore.succeeded}")
+              if [ -z "$succeeded" ] || [ "$succeeded" -lt 1 ]; then
+                  >&2 echo 'pgBackRest restore failed. Check the logs of the restore job created by PGO.'
+                  exit 1
+              fi
