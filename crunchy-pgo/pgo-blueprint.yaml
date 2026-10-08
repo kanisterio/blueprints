@@ -16,7 +16,7 @@ actions:
       - func: KubeTask
         name: pgoBackup
         args:
-          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.118.0
+          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.119.0
           command:
             - bash
             - -o
@@ -71,7 +71,7 @@ actions:
       - func: KubeTask
         name: getTimelineInfo
         args:
-          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.118.0
+          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.119.0
           command:
             - bash
             - -o
@@ -125,7 +125,7 @@ actions:
       - func: KubeTask
         name: pgoRestore
         args:
-          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.118.0
+          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.119.0
           command:
             - bash
             - -o
@@ -184,7 +184,7 @@ actions:
       - func: KubeTask
         name: pgoRestoreDisable
         args:
-          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.118.0
+          image: ghcr.io/kanisterio/kanister-kubectl-1.18:0.119.0
           command:
             - bash
             - -o
