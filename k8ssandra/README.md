@@ -14,93 +14,96 @@ K8ssandra operator uses Medusa to backup and restore Cassandra data. Kanister ca
 
 ## Chart Details
 
-We will be using [K8ssandra](https://github.com/k8ssandra/k8ssandra/tree/main/charts/k8ssandra) official Helm charts to deploy K8ssandra stack on [Kubernetes](http://kubernetes.io) cluster using the [Helm](https://helm.sh) package manager.
+We will be using the official [k8ssandra-operator](https://github.com/k8ssandra/k8ssandra-operator) Helm chart to deploy the K8ssandra stack on a [Kubernetes](http://kubernetes.io) cluster using the [Helm](https://helm.sh) package manager.
+
+The blueprint uses the Medusa APIs (`medusa.k8ssandra.io/v1alpha1` - `MedusaBackupJob`, `MedusaBackup` and `MedusaRestoreJob`) that are provided by k8ssandra-operator. The legacy `k8ssandra/k8ssandra` (v1) chart and its `cassandra.k8ssandra.io` `CassandraBackup`/`CassandraRestore` APIs are not supported by this blueprint.
 
 ## Installing the K8ssandra
 
-> Complete guide to provision K8s cluster locally with required resources and installing K8ssandra can be found [here](https://docs-v1.k8ssandra.io/install/local/).
+> Complete guide to install k8ssandra-operator can be found [here](https://docs.k8ssandra.io/install/).
 
 Before we begin, make sure that there exists a storageclass with **VOLUMEBINDINGMODE of WaitForFirstConsumer.**
 
+### Install cert-manager and k8ssandra-operator
+
+k8ssandra-operator requires [cert-manager](https://cert-manager.io) to be installed in the cluster.
+
+```bash
+# Install cert-manager
+$ helm repo add jetstack https://charts.jetstack.io
+$ helm repo update
+$ helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true
+
+# Add k8ssandra Helm repo
+$ helm repo add k8ssandra https://helm.k8ssandra.io/stable
+$ helm repo update
+
+# Install k8ssandra-operator
+$ helm install k8ssandra-operator k8ssandra/k8ssandra-operator -n k8ssandra --create-namespace
+```
 
 ### Create S3 creds secret for Medusa Amazon S3 integration
 
 K8ssandra Operator deploys Medusa to support backup and restore operations of Apache Cassandra® tables.
 
-Medusa supports different types of object stores including GCS, S3, and S3-compatible stores like MinIO, CEPH Object Gateway, etc. The complete list can be found [here](https://docs-v1.k8ssandra.io/components/medusa/#supported-storage-objects).
+Medusa supports different types of object stores including GCS, S3, and S3-compatible stores like MinIO, CEPH Object Gateway, etc. The complete list can be found [here](https://docs.k8ssandra.io/tasks/backup-restore/).
 
 For the scope of this example, we will just focus on S3 bucket. But you can choose any object store of your choice.
 
-Create a secret using the following template to enable S3 integration with Medusa. Replace `my_access_key` and `my_secret_key` with actual keys before creating the secret.
+Create a secret in the `k8ssandra` namespace using the following template to enable S3 integration with Medusa. Replace `my_access_key` and `my_secret_key` with actual keys before creating the secret.
 
-```
+```yaml
 apiVersion: v1
 kind: Secret
 metadata:
  name: medusa-bucket-key
+ namespace: k8ssandra
 type: Opaque
 stringData:
- # Note that this currently has to be set to medusa_s3_credentials!
- medusa_s3_credentials: |-
+ # Note that this currently has to be set to credentials!
+ credentials: |-
    [default]
    aws_access_key_id = my_access_key
    aws_secret_access_key = my_secret_key
 ```
 
 ### Create K8ssandra cluster
-Create a Helm configuration file e.g values.yaml with the following configuration so that K8ssandra installation works on the limited resources we have locally.
 
-```
-cassandra:
-  version: "3.11.10"
-  cassandraLibDirVolume:
-    size: 5Gi
-  allowMultipleNodesPerWorker: true
-  heap:
-    size: 200M
-    newGenSize: 800M
-  resources:
-    requests:
-      cpu: 900m
-      memory: 1Gi
-    limits:
-      cpu: 900m
-      memory: 1Gi
-  datacenters:
-  - name: dc1
-    size: 1
-    racks:
-    - name: default
-kube-prometheus-stack:
-  enabled: false
-reaper:
-  enabled: false
-reaper-operator:
-  enabled: false
-stargate:
-  enabled: true
-  replicas: 1
-  heapMB: 256
-  cpuReqMillicores: 200
-  cpuLimMillicores: 1000
-medusa:
-  enabled: true
-  storageSecret: medusa-bucket-key
-  storage: s3
-```
+Create a `K8ssandraCluster` resource e.g. k8ssandra-cluster.yaml with the following configuration so that K8ssandra installation works on the limited resources we have locally.
 
-Pass the values.yaml file to `helm install` command to overwrite the default Helm chart configuration
-
-```bash
-# Add k8ssandra Helm repo
-$ helm repo add k8ssandra https://helm.k8ssandra.io/stable
-$ helm repo update
-
-# Install K8ssandra operator
-$ helm install k8ssandra k8ssandra/k8ssandra -n k8ssandra --create-namespace -f ./values.yaml \
-    --set cassandra.cassandraLibDirVolume.storageClass=<storage_class> \
-    --set medusa.bucketName=<aws_s3_bucket_name> \
-    --set medusa.storage_properties.region=<aws_bucket_region>
+```yaml
+apiVersion: k8ssandra.io/v1alpha1
+kind: K8ssandraCluster
+metadata:
+  name: k8ssandra
+  namespace: k8ssandra
+spec:
+  cassandra:
+    serverVersion: "4.0.1"
+    datacenters:
+      - metadata:
+          name: dc1
+        size: 1
+        storageConfig:
+          cassandraDataVolumeClaimSpec:
+            storageClassName: <storage_class>
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 5Gi
+        config:
+          jvmOptions:
+            heapSize: 512M
+  medusa:
+    storageProperties:
+      storageProvider: s3
+      storageSecretRef:
+        name: medusa-bucket-key
+      bucketName: <aws_s3_bucket_name>
+      region: <aws_bucket_region>
+      prefix: k8ssandra
+      secure: true
 ```
 
 Where,
@@ -109,12 +112,20 @@ Where,
 - `aws_s3_bucket_name` is the S3 bucket that will be used for backup by Medusa.
 - `aws_bucket_region` is the AWS region bucket exists.
 
-Installing the Helm chart will create a few components like `cass-operator`, `medusa-operator` and `dc` pods. The actual Cassandra node name from the running pod listing is `k8ssandra-dc1-rack-a-sts-0` which we’ll use throughout the following example.
+```bash
+$ kubectl apply -f k8ssandra-cluster.yaml
+```
+
+The operator will create a `CassandraDatacenter` named `dc1` in the `k8ssandra` namespace. The Cassandra pod is named `k8ssandra-dc1-default-sts-0`, which we’ll use throughout the following example. Wait till the datacenter is ready:
+
+```bash
+$ kubectl wait cassandradatacenters.cassandra.datastax.com/dc1 -n k8ssandra --for=condition=Ready --timeout=15m
+```
 
 
 **NOTE:**
 
-Kanister operator role needs to be updated in order to access custom resources.
+Kanister operator role needs to be updated in order to access the `CassandraDatacenter` and Medusa (`medusa.k8ssandra.io`) custom resources.
 Create required ClusterRole and ClusterRoleBinding with the following command.
 
 ```bash
@@ -139,15 +150,15 @@ blueprint.cr.kanister.io/k8ssandra-blueprint created
 Once K8ssandra pods are running, you can populate it with some data.
 
 ```bash
-# Connect to cassandra pod
-$ kubectl exec -ti k8ssandra-dc1-rack-a-sts-0 -c cassandra -n k8ssandra -- bash
+# k8ssandra-operator enables authentication by default, fetch the superuser credentials
+$ CASS_USERNAME=$(kubectl get secret k8ssandra-superuser -n k8ssandra -o jsonpath='{.data.username}' | base64 --decode)
+$ CASS_PASSWORD=$(kubectl get secret k8ssandra-superuser -n k8ssandra -o jsonpath='{.data.password}' | base64 --decode)
 
-# once you are inside the pod use `cqlsh` to get into the Cassandra CLI and run the below commands to create the keyspace
-$ cassandra@k8ssandra-dc1-rack-a-sts-0:/$ cqlsh
-Connected to k8ssandra at 127.0.0.1:9042.
-[cqlsh 5.0.1 | Cassandra 3.11.10 | CQL spec 3.4.4 | Native protocol v4]
-Use HELP for help.
-$ cqlsh> create keyspace restaurants with replication  = {'class':'SimpleStrategy', 'replication_factor': 3};
+# Connect to the Cassandra CLI (cqlsh) in the cassandra pod
+$ kubectl exec -ti k8ssandra-dc1-default-sts-0 -c cassandra -n k8ssandra -- cqlsh -u $CASS_USERNAME -p $CASS_PASSWORD
+
+# create the keyspace
+$ cqlsh> create keyspace restaurants with replication  = {'class':'SimpleStrategy', 'replication_factor': 1};
 
 # once the keyspace is created let's create a table named guests and some data into that table
 $ cqlsh> create table restaurants.guests (id UUID primary key, firstname text, lastname text, birthday timestamp);
@@ -181,23 +192,19 @@ actionset backup-swxnq created
 $ kubectl describe actionset backup-swxnq -n kanister
 
 # Wait till the actionset `completes`
+
+# The backup action creates a MedusaBackupJob and waits for the corresponding MedusaBackup to finish
+$ kubectl get medusabackupjobs.medusa.k8ssandra.io,medusabackups.medusa.k8ssandra.io -n k8ssandra
 ```
 
 ### Disaster strikes!
 
-Let's say someone accidentally deleted the bucket using the following command in K8ssandra cluster pod.
+Let's say someone accidentally deleted the keyspace using the following command in K8ssandra cluster pod.
 
 ```bash
-# Connect to cassandra pod
-$ kubectl exec -ti k8ssandra-dc1-rack-a-sts-0 -c cassandra -n k8ssandra -- bash
+# Connect to the Cassandra CLI (cqlsh) in the cassandra pod
+$ kubectl exec -ti k8ssandra-dc1-default-sts-0 -c cassandra -n k8ssandra -- cqlsh -u $CASS_USERNAME -p $CASS_PASSWORD
 
-# once you are inside the pod use `cqlsh` to get into the Cassandra CLI and run below commands to create the keyspace
-$ cassandra@k8ssandra-dc1-rack-a-sts-0:/$ cqlsh
-Connected to k8ssandra at 127.0.0.1:9042.
-[cqlsh 5.0.1 | Cassandra 3.11.10 | CQL spec 3.4.4 | Native protocol v4]
-Use HELP for help.
-
-# once you are inside the pod use `cqlsh` to get into the Cassandra CLI and run below commands to create the keyspace
 # drop the guests table
 $ cqlsh> drop table if exists restaurants.guests;
 # drop restaurants keyspace
@@ -216,17 +223,18 @@ actionset restore-backup-swxnq-9hhmd created
 $ kubectl describe actionset restore-backup-swxnq-9hhmd --namespace kanister
 ```
 
+The restore action creates a `MedusaRestoreJob`, waits for it to finish and then deletes it. Medusa restores the datacenter in place, so the Cassandra pods are restarted during the restore.
+
 Once you have verified that the status of the Actionset <restore-actionset> is completed. You can check if the data is restored or not by EXECing into the Cassandra pod and selecting all the data from the table.
 
 ```bash
-$ kubectl exec -ti k8ssandra-dc1-rack-a-sts-0 -c cassandra -n k8ssandra -- bash
-# once you are inside the pod use `cqlsh` to get into the Cassandra CLI and run below commands to create the keyspace
+$ kubectl exec -ti k8ssandra-dc1-default-sts-0 -c cassandra -n k8ssandra -- cqlsh -u $CASS_USERNAME -p $CASS_PASSWORD
 $ cqlsh> select * from restaurants.guests;
 ```
 
 ### Delete the Artifacts
 
-The artifacts created by the backup action can be cleaned up using the following command.
+The artifacts created by the backup action can be cleaned up using the following command. The delete action removes both the `MedusaBackup` and the `MedusaBackupJob` resources created by the backup action.
 
 ```bash
 $ kanctl create actionset --action delete --from backup-swxnq -n kanister --namespacetargets kanister
@@ -253,13 +261,14 @@ $ kubectl describe actionset <actionset-name> -n <kanister-operator-namespace>
 
 ## Uninstalling the Chart
 
-To uninstall/delete the K8ssandra application run the below command.
+To uninstall/delete the K8ssandra application run the below commands.
 
 ```bash
-$ helm delete k8ssandra -n k8ssandra
+$ kubectl delete k8ssandraclusters.k8ssandra.io k8ssandra -n k8ssandra
+$ helm delete k8ssandra-operator -n k8ssandra
 ```
 
-The command removes all the Kubernetes components associated with the chart and deletes the release.
+The commands remove the K8ssandra cluster, all the Kubernetes components associated with the chart and delete the release.
 
 ## Delete Blueprint and Profile CR
 
