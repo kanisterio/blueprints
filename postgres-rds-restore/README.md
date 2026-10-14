@@ -27,13 +27,13 @@ This is highly insecure. Its good only for testing and should not be used in a p
 For production, make sure to restrict the source (CIDR or otherwise) to only the elements that need to access the DB.
 
 ```bash
-aws ec2 create-security-group --group-name <security-group-name> --description "pgtest security group"
-aws ec2 authorize-security-group-ingress --group-name <security-group-name> --protocol tcp --port 5432 --cidr 0.0.0.0/0
+aws ec2 create-security-group --group-name <security-group-name> --description "pgtest security group" --region <region-name>
+aws ec2 authorize-security-group-ingress --group-name <security-group-name> --protocol tcp --port 5432 --cidr 0.0.0.0/0 --region <region-name>
 ```
 
 Fetch the Security Group ID
 ``` bash
-$ aws ec2 describe-security-groups --filters "Name=group-name,Values=<security-group-name>" --query "SecurityGroups[*].GroupId"
+$ aws ec2 describe-security-groups --filters "Name=group-name,Values=<security-group-name>" --query "SecurityGroups[*].GroupId" --region <region-name>
 ```
 
 Now create an RDS instance with the PostgreSQL engine
@@ -46,18 +46,22 @@ aws rds create-db-instance \
     --engine postgres \
     --master-username <master-username> \
     --vpc-security-group-ids <security-group-id> \
-    --master-user-password <db-password>
+    --master-user-password <db-password> \
+    --region <region-name>
 
-aws rds wait db-instance-available --db-instance-identifier=<instance-name>
+aws rds wait db-instance-available --db-instance-identifier=<instance-name> --region <region-name>
 ```
 
 Where `<security-group-id>` is the security group with the TCP 5432 inbound rule.
 
 ## Create configmap
 
-The blueprint is run against a ConfigMap that holds the RDS instance identifier. Create the following ConfigMap e.g. `dbconfig.yaml`:
+The blueprint is run against a ConfigMap that holds the RDS instance identifier. Create the ConfigMap using the following commands:
 
-```yaml
+```bash
+$ kubectl create namespace postgres-test
+
+$ cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -65,11 +69,7 @@ metadata:
   namespace: postgres-test
 data:
   postgres.instanceid: <instance-name>  # identifier of the RDS instance to protect
-```
-
-```bash
-$ kubectl create namespace postgres-test
-$ kubectl apply -f dbconfig.yaml
+EOF
 ```
 
 ## Integrating with Kanister
@@ -92,6 +92,47 @@ $ kanctl create profile s3compliant --access-key <aws-access-key-id> \
 The blueprint uses the credentials and the region from this Profile to perform the RDS operations, so `<region-name>` must be the region of the RDS instance and the credentials must have proper permissions to perform operations on RDS.
 Every ActionSet requires a Profile reference to complete the action. This CR (`profiles.cr.kanister.io`)
 can be shared between Kanister-enabled application instances.
+
+### Grant Kanister access to the application namespace
+
+The Kanister controller needs to read the Profile's credentials secret and the `dbconfig` ConfigMap in the `postgres-test` namespace. By default, the Kanister Helm chart only grants these permissions in the controller's own namespace, so create the following Role and RoleBinding:
+
+```bash
+$ cat <<EOF | kubectl apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kanister-rds-read
+  namespace: postgres-test
+rules:
+- apiGroups: [""]
+  resources: ["secrets", "configmaps"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kanister-rds-read
+  namespace: postgres-test
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kanister-rds-read
+subjects:
+- kind: ServiceAccount
+  name: kanister-kanister-operator
+  namespace: kanister
+EOF
+```
+
+You may have to update the service account name and namespace in the RoleBinding if you have deployed Kanister with another name or in another namespace.
+
+Verify the permissions, both commands should return `yes`:
+
+```bash
+$ kubectl auth can-i get secrets -n postgres-test --as=system:serviceaccount:kanister:kanister-kanister-operator
+$ kubectl auth can-i get configmaps -n postgres-test --as=system:serviceaccount:kanister:kanister-kanister-operator
+```
 
 ### Create Blueprint
 
@@ -143,7 +184,7 @@ test=> select * from company;
 Where `<rds-instance-endpoint>` is the endpoint of the RDS instance, which can be fetched using:
 
 ```bash
-$ aws rds describe-db-instances --db-instance-identifier <instance-name> --query "DBInstances[0].Endpoint.Address" --output text
+$ aws rds describe-db-instances --db-instance-identifier <instance-name> --query "DBInstances[0].Endpoint.Address" --output text --region <region-name>
 ```
 
 ## Protect the Application
@@ -156,9 +197,10 @@ NAME               AGE
 s3-profile-7d6wt   7m25s
 ```
 
-Create an ActionSet file e.g. `rds-backup-actionset.yaml`:
+Create the backup ActionSet using the following command:
 
-```yaml
+```bash
+$ cat <<EOF | kubectl apply -f -
 apiVersion: cr.kanister.io/v1alpha1
 kind: ActionSet
 metadata:
@@ -177,10 +219,7 @@ spec:
     profile:
       name: s3-profile-7d6wt
       namespace: postgres-test
-```
-
-```bash
-$ kubectl apply -f rds-backup-actionset.yaml
+EOF
 actionset.cr.kanister.io/rds-backup created
 
 # View the status of the actionset
@@ -267,11 +306,11 @@ $ kubectl describe actionset <actionset-name> -n kanister
 ### Delete the RDS instance
 
 ```bash
-$ aws rds delete-db-instance --db-instance-identifier <instance-name> --skip-final-snapshot
+$ aws rds delete-db-instance --db-instance-identifier <instance-name> --skip-final-snapshot --region <region-name>
 ```
 
 ### Delete CRs
-Remove Blueprint, Profile CR and ConfigMap
+Remove Blueprint, Profile CR, ConfigMap and the Kanister Role and RoleBinding
 
 ```bash
 $ kubectl delete blueprints.cr.kanister.io rds-postgres-bp -n kanister
@@ -282,4 +321,6 @@ s3-profile-7d6wt   17m
 $ kubectl delete profiles.cr.kanister.io s3-profile-7d6wt -n postgres-test
 
 $ kubectl delete configmap dbconfig -n postgres-test
+
+$ kubectl delete rolebinding,role kanister-rds-read -n postgres-test
 ```

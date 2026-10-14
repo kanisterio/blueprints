@@ -50,9 +50,10 @@ Medusa supports different types of object stores including GCS, S3, and S3-compa
 
 For the scope of this example, we will just focus on S3 bucket. But you can choose any object store of your choice.
 
-Create a secret in the `k8ssandra` namespace using the following template to enable S3 integration with Medusa. Replace `my_access_key` and `my_secret_key` with actual keys before creating the secret.
+Create a secret in the `k8ssandra` namespace using the following command to enable S3 integration with Medusa. Replace `my_access_key` and `my_secret_key` with actual keys before running the command.
 
-```yaml
+```bash
+$ cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Secret
 metadata:
@@ -65,13 +66,19 @@ stringData:
    [default]
    aws_access_key_id = my_access_key
    aws_secret_access_key = my_secret_key
+EOF
 ```
 
 ### Create K8ssandra cluster
 
-Create a `K8ssandraCluster` resource e.g. k8ssandra-cluster.yaml with the following configuration so that K8ssandra installation works on the limited resources we have locally.
+Create a `K8ssandraCluster` resource with the following configuration so that K8ssandra installation works on the limited resources we have locally. Replace the following placeholders before running the command:
 
-```yaml
+- `storage_class` is the storageclass with `WaitForFirstConsumer` VolumeBindingMode.
+- `aws_s3_bucket_name` is the S3 bucket that will be used for backup by Medusa.
+- `aws_bucket_region` is the AWS region bucket exists.
+
+```bash
+$ cat <<EOF | kubectl apply -f -
 apiVersion: k8ssandra.io/v1alpha1
 kind: K8ssandraCluster
 metadata:
@@ -79,7 +86,7 @@ metadata:
   namespace: k8ssandra
 spec:
   cassandra:
-    serverVersion: "4.0.1"
+    serverVersion: "4.1.5"
     datacenters:
       - metadata:
           name: dc1
@@ -104,23 +111,18 @@ spec:
       region: <aws_bucket_region>
       prefix: k8ssandra
       secure: true
+EOF
 ```
 
-Where,
-
-- `storage_class` is the storageclass with `WaitForFirstConsumer` VolumeBindingMode.
-- `aws_s3_bucket_name` is the S3 bucket that will be used for backup by Medusa.
-- `aws_bucket_region` is the AWS region bucket exists.
+The operator will create a `CassandraDatacenter` named `dc1` in the `k8ssandra` namespace. The Cassandra pod is named `k8ssandra-dc1-default-sts-0`, which we’ll use throughout the following example. Wait till the datacenter is created and ready:
 
 ```bash
-$ kubectl apply -f k8ssandra-cluster.yaml
-```
-
-The operator will create a `CassandraDatacenter` named `dc1` in the `k8ssandra` namespace. The Cassandra pod is named `k8ssandra-dc1-default-sts-0`, which we’ll use throughout the following example. Wait till the datacenter is ready:
-
-```bash
+# The CassandraDatacenter is created by the operator after it reconciles the K8ssandraCluster
+$ kubectl wait cassandradatacenters.cassandra.datastax.com/dc1 -n k8ssandra --for=create --timeout=5m
 $ kubectl wait cassandradatacenters.cassandra.datastax.com/dc1 -n k8ssandra --for=condition=Ready --timeout=15m
 ```
+
+> `--for=create` requires kubectl 1.31+. If the datacenter is not created, check the `ERROR` column of `kubectl get k8ssandraclusters -n k8ssandra` and the k8ssandra-operator logs.
 
 
 **NOTE:**
