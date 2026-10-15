@@ -5,11 +5,20 @@ metadata:
   labels:
     app: kanister-operator
 rules:
+# Read the CassandraDatacenter that the ActionSet targets
 - apiGroups:
-  - cassandra.k8ssandra.io
   - cassandra.datastax.com
   resources:
-  - '*'
+  - cassandradatacenters
+  verbs:
+  - get
+# Create, wait on, and delete Medusa backup/restore resources
+- apiGroups:
+  - medusa.k8ssandra.io
+  resources:
+  - medusabackupjobs
+  - medusabackups
+  - medusarestorejobs
   verbs:
   - get
   - create

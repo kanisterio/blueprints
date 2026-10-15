@@ -4,23 +4,20 @@
 
 ## Introduction
 
-This example demonstrates how to provision an AWS RDS Instance, and use Kanister to backup data from an on-prem Postgres installation and restore that data into the provisioned AWS RDS instance.
+This example demonstrates how to use Kanister to protect an AWS RDS PostgreSQL instance using RDS snapshots. The blueprint uses the Kanister functions [CreateRDSSnapshot](https://docs.kanister.io/functions.html#createrdssnapshot), [RestoreRDSSnapshot](https://docs.kanister.io/functions.html#restorerdssnapshot) and [DeleteRDSSnapshot](https://docs.kanister.io/functions.html#deleterdssnapshot) to back up, restore, and delete snapshots of the RDS instance. No custom image is required.
 
 ## Prerequisites
 
 - Kubernetes 1.10+
-- PV provisioner support in the underlying infrastructure
-- Kanister controller version 0.84.0 installed in your cluster
+- Kanister controller version 0.118.0 installed in your cluster
 - Kanctl CLI installed (https://docs.kanister.io/tooling.html#kanctl)
+- AWS credentials with permissions to perform RDS snapshot operations (create, describe, restore and delete DB snapshots and instances)
 
 ## Create RDS instance on AWS
 
-We need to have a Postgres RDS instance where we will restore the data.
-
 > You can skip this step if you already have an RDS instance created
 
-RDS instance needs to be reachable from the Kubernetes cluster performing the restore operation. So make sure that you have VPC with the security group having the rule to allow ingress traffic on 5432 TCP port.
-
+To connect to the RDS instance and populate data, make sure that you have a VPC with a security group that has a rule to allow ingress traffic on 5432 TCP port.
 
 You can create a security group and add rules to the default VPC using the following commands
 
@@ -30,13 +27,13 @@ This is highly insecure. Its good only for testing and should not be used in a p
 For production, make sure to restrict the source (CIDR or otherwise) to only the elements that need to access the DB.
 
 ```bash
-aws ec2 create-security-group --group-name <security-group-name> --description "pgtest security group"
-aws ec2 authorize-security-group-ingress --group-name <security-group-name> --protocol tcp --port 5432 --cidr 0.0.0.0/0
+aws ec2 create-security-group --group-name <security-group-name> --description "pgtest security group" --region <region-name>
+aws ec2 authorize-security-group-ingress --group-name <security-group-name> --protocol tcp --port 5432 --cidr 0.0.0.0/0 --region <region-name>
 ```
 
 Fetch the Security Group ID
 ``` bash
-$ aws ec2 describe-security-groups --filters "Name=group-name,Values=<security-group-name>" --query "SecurityGroups[*].GroupId"
+$ aws ec2 describe-security-groups --filters "Name=group-name,Values=<security-group-name>" --query "SecurityGroups[*].GroupId" --region <region-name>
 ```
 
 Now create an RDS instance with the PostgreSQL engine
@@ -47,69 +44,37 @@ aws rds create-db-instance \
     --allocated-storage 20 --db-instance-class db.t3.micro \
     --db-instance-identifier <instance-name> \
     --engine postgres \
-    --engine-version 15.2
     --master-username <master-username> \
-    --vpc-security-group-ids <security-group-id> \ # Sec group with TCP 5432 inbound rule
-    --master-user-password <db-password>
+    --vpc-security-group-ids <security-group-id> \
+    --master-user-password <db-password> \
+    --region <region-name>
 
-aws rds wait db-instance-available --db-instance-identifier=<instance-name>
+aws rds wait db-instance-available --db-instance-identifier=<instance-name> --region <region-name>
 ```
+
+Where `<security-group-id>` is the security group with the TCP 5432 inbound rule.
+
 ## Create configmap
 
-Create a configmap that contains information to connect to the RDS DB instance
+The blueprint is run against a ConfigMap that holds the RDS instance identifier. Create the ConfigMap using the following commands:
 
-```
+```bash
+$ kubectl create namespace postgres-test
+
+$ cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: dbconfig
+  namespace: postgres-test
 data:
-  region: <region-name> #Region in which instance is to be created
-  instance_name: <instance-name>  # name of the RDS Instance that would be provisioned
+  postgres.instanceid: <instance-name>  # identifier of the RDS instance to protect
+EOF
 ```
-
-## Create secret
-
-Create a secret that contains credentials to connect to the RDS DB instance
-
-```
-apiVersion: v1
-kind: Secret
-metadata:
-  name: dbsecret
-stringData:
-  ########## AWS Key CREDS
-  accessKeyId: 
-  secretAccessKey:
-  ########## Database instance creds
-  postgres_username: <master-username>
-  postgres_password: <db-password> 
-```
-
-**NOTE**
-
-The AWS credentials must have proper permissions to perform operations on RDS.
-
-## Installing the PostgreSQL Chart
-
-To install the PostgreSQL chart with the release name `my-release` and default configuration, run the following commands:
-
-```bash
-$ helm repo add bitnami https://charts.bitnami.com/bitnami
-$ helm repo update
-
-$ helm install my-release --create-namespace --namespace postgres-test bitnami/postgresql \
-  --set image.repository=bitnamilegacy/postgresql \
-  --set global.security.allowInsecureImages=true \
-  --set volumePermissions.image.repository=bitnamilegacy/os-shell
-```
-
-> **Tip**: List all releases using `helm list`
-
 
 ## Integrating with Kanister
 
-If you have deployed a PostgreSQL application with a name other than `my-release` and a namespace other than `postgres-test`, you need to modify the commands used below to use the correct name and namespace
+If you have created the ConfigMap with a name other than `dbconfig` or in a namespace other than `postgres-test`, you need to modify the commands used below to use the correct name and namespace.
 
 ### Create Profile
 
@@ -124,57 +89,72 @@ $ kanctl create profile s3compliant --access-key <aws-access-key-id> \
 
 **NOTE:**
 
-The command will configure a location where artifacts resulting from Kanister
-data operations such as backup should go. This is stored as a `profiles.cr.kanister.io`
-*CustomResource (CR)* which is then referenced in Kanister ActionSets. Every ActionSet
-requires a Profile reference to complete the action. This CR (`profiles.cr.kanister.io`)
+The blueprint uses the credentials and the region from this Profile to perform the RDS operations, so `<region-name>` must be the region of the RDS instance and the credentials must have proper permissions to perform operations on RDS.
+Every ActionSet requires a Profile reference to complete the action. This CR (`profiles.cr.kanister.io`)
 can be shared between Kanister-enabled application instances.
 
-## Create Docker Image to be used in the Blueprint
-Create the docker image which includes awscli, psql and kando (https://docs.kanister.io/tooling.html#kando) . This image will be provided in the Kanister blueprint that we are going to create later.
+### Grant Kanister access to the application namespace
+
+The Kanister controller needs to read the Profile's credentials secret and the `dbconfig` ConfigMap in the `postgres-test` namespace. By default, the Kanister Helm chart only grants these permissions in the controller's own namespace, so create the following Role and RoleBinding:
 
 ```bash
-$ docker build -t <image-registry>/<image-repo>:<tag> .
-$ docker push <image-registry>/<image-repo>:<tag>
+$ cat <<EOF | kubectl apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kanister-rds-read
+  namespace: postgres-test
+rules:
+- apiGroups: [""]
+  resources: ["secrets", "configmaps"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kanister-rds-read
+  namespace: postgres-test
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kanister-rds-read
+subjects:
+- kind: ServiceAccount
+  name: kanister-kanister-operator
+  namespace: kanister
+EOF
+```
+
+You may have to update the service account name and namespace in the RoleBinding if you have deployed Kanister with another name or in another namespace.
+
+Verify the permissions, both commands should return `yes`:
+
+```bash
+$ kubectl auth can-i get secrets -n postgres-test --as=system:serviceaccount:kanister:kanister-kanister-operator
+$ kubectl auth can-i get configmaps -n postgres-test --as=system:serviceaccount:kanister:kanister-kanister-operator
 ```
 
 ### Create Blueprint
 
-Modify the `rds-restore-blueprint.yaml` file and update the `image` field of the `Phases` to use the docker image built in the previous step.  
-
-Create a Blueprint in the same namespace as the controller. 
+Create a Blueprint in the same namespace as the controller.
 
 ```bash
-$ kubectl create -f ./rds-restore-blueprint.yaml -n kanister
+$ kubectl create -f ./postgres-rds-restore-blueprint.yaml -n kanister
+blueprint.cr.kanister.io/rds-postgres-bp created
 ```
 
-Once Postgres is running, you can populate it with some data. Let's add a table called "company" to a "test" database:
+Once the RDS instance is available, you can populate it with some data. Let's add a table called "company" to a "test" database:
 
 ```bash
-$ export POSTGRES_PASSWORD=$(kubectl get secret --namespace postgres-test my-release-postgresql -o jsonpath="{.data.postgres-password}" | base64 -d)
+$ kubectl run postgresql-client --rm --tty -i --restart='Never' --namespace postgres-test --image docker.io/bitnamilegacy/postgresql:17.6.0 --env="PGPASSWORD=<db-password>" \
+      --command -- psql --host <rds-instance-endpoint> -U <master-username> -d postgres -p 5432
 
-$ kubectl run my-release-postgresql-client --rm --tty -i --restart='Never' --namespace postgres-test --image docker.io/bitnamilegacy/postgresql:17.6.0 --env="PGPASSWORD=$POSTGRES_PASSWORD" \
-      --command -- psql --host my-release-postgresql -U postgres -d postgres -p 5432
-
-postgres=# 
-postgres=# CREATE DATABASE test;
+postgres=> CREATE DATABASE test;
 CREATE DATABASE
-postgres=# \l
-                                  List of databases
-   Name    |  Owner   | Encoding |   Collate   |    Ctype    |   Access privileges
------------+----------+----------+-------------+-------------+-----------------------
- postgres  | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 |
- template0 | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 | =c/postgres          +
-           |          |          |             |             | postgres=CTc/postgres
- template1 | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 | =c/postgres          +
-           |          |          |             |             | postgres=CTc/postgres
- test      | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 |
-(4 rows)
 
 ## Create table COMPANY in test database
-postgres=# \c test
-You are now connected to database "test" as user "postgres".
-test=# CREATE TABLE COMPANY(
+postgres=> \c test
+test=> CREATE TABLE COMPANY(
      ID INT PRIMARY KEY     NOT NULL,
      NAME           TEXT    NOT NULL,
      AGE            INT     NOT NULL,
@@ -185,108 +165,126 @@ test=# CREATE TABLE COMPANY(
 CREATE TABLE
 
 ## Insert data into the table
-test=# INSERT INTO COMPANY (ID,NAME,AGE,ADDRESS,SALARY,CREATED_AT) VALUES (10, 'Paul', 32, 'California', 20000.00, now());
+test=> INSERT INTO COMPANY (ID,NAME,AGE,ADDRESS,SALARY,CREATED_AT) VALUES (10, 'Paul', 32, 'California', 20000.00, now());
 INSERT 0 1
-test=# select * from company;
- id | name | age |                      address                       | salary |         created_at
-----+------+-----+----------------------------------------------------+--------+----------------------------
- 10 | Paul |  32 | California                                         |  20000 | 2019-09-16 14:39:36.316065
-(1 row)
-
-## Add few more entries
-test=# INSERT INTO COMPANY (ID,NAME,AGE,ADDRESS,SALARY,CREATED_AT) VALUES (20, 'Omkar', 32, 'California', 20000.00, now());
+test=> INSERT INTO COMPANY (ID,NAME,AGE,ADDRESS,SALARY,CREATED_AT) VALUES (20, 'Omkar', 32, 'California', 20000.00, now());
 INSERT 0 1
-test=# INSERT INTO COMPANY (ID,NAME,AGE,ADDRESS,SALARY,CREATED_AT) VALUES (30, 'Prasad', 32, 'California', 20000.00, now());
+test=> INSERT INTO COMPANY (ID,NAME,AGE,ADDRESS,SALARY,CREATED_AT) VALUES (30, 'Prasad', 32, 'California', 20000.00, now());
 INSERT 0 1
 
-test=# select * from company;
- id | name  | age |                      address                       | salary |         created_at
-----+-------+-----+----------------------------------------------------+--------+----------------------------
- 10 | Paul  |  32 | California                                         |  20000 | 2019-09-16 14:39:36.316065
- 20 | Omkar |  32 | California                                         |  20000 | 2019-09-16 14:40:52.952459
- 30 | Omkar |  32 | California                                         |  20000 | 2019-09-16 14:41:06.433487
+test=> select * from company;
+ id |  name  | age |                      address                       | salary |         created_at
+----+--------+-----+----------------------------------------------------+--------+----------------------------
+ 10 | Paul   |  32 | California                                         |  20000 | 2019-09-16 14:39:36.316065
+ 20 | Omkar  |  32 | California                                         |  20000 | 2019-09-16 14:40:52.952459
+ 30 | Prasad |  32 | California                                         |  20000 | 2019-09-16 14:41:06.433487
+(3 rows)
+```
+
+Where `<rds-instance-endpoint>` is the endpoint of the RDS instance, which can be fetched using:
+
+```bash
+$ aws rds describe-db-instances --db-instance-identifier <instance-name> --query "DBInstances[0].Endpoint.Address" --output text --region <region-name>
 ```
 
 ## Protect the Application
 
-You can now take a backup of the PostgresDB data by creating backup ActionSet for this application. Create an ActionSet in the same namespace as the controller.
+You can now take a snapshot of the RDS instance by creating a backup ActionSet for this application. Create an ActionSet in the same namespace as the controller.
 
 ```bash
 $ kubectl get profile -n postgres-test
 NAME               AGE
 s3-profile-7d6wt   7m25s
+```
 
-$ kanctl create actionset --action backup --namespace kanister --blueprint rds-postgres-bp --statefulset postgres-test/my-release-postgresql --profile postgres-test/s3-profile-7d6wt
-actionset backup-llfb8 created
+Create the backup ActionSet using the following command:
 
-$ kubectl --namespace kanister get actionsets.cr.kanister.io
-NAME           AGE
-backup-glptq   38s
+```bash
+$ cat <<EOF | kubectl apply -f -
+apiVersion: cr.kanister.io/v1alpha1
+kind: ActionSet
+metadata:
+  name: rds-backup
+  namespace: kanister
+spec:
+  actions:
+  - name: backup
+    blueprint: rds-postgres-bp
+    object:
+      apiVersion: v1
+      kind: ConfigMap
+      name: dbconfig
+      namespace: postgres-test
+      resource: configmaps
+    profile:
+      name: s3-profile-7d6wt
+      namespace: postgres-test
+EOF
+actionset.cr.kanister.io/rds-backup created
 
 # View the status of the actionset
-$ kubectl --namespace kanister describe actionset backup-glptq
+$ kubectl --namespace kanister describe actionset rds-backup
 ```
 
-### Restore the Application to RDS Database instance
-
-To restore the data into RDS Postgres instance, you should use the backup that you created before. An easy way to do this is to leverage `kanctl`, a command-line tool that helps create ActionSets that depend on other ActionSets. Apart from this we also need to pass RDS instance details to the blueprint, the secret and configmap resource containing these details can be passed to kanctl:
+Once the ActionSet is complete, the RDS snapshot can be seen using:
 
 ```bash
-$ kanctl --namespace kanister create actionset --action restore --from backup-glptq --config-maps dbconfig=postgres-test/dbconfig --secrets dbsecret=postgres-test/dbsecret
-actionset restore-backup-glptq-6jzt4 created
+$ aws rds describe-db-snapshots --db-instance-identifier <instance-name> --region <region-name>
+```
+
+### Disaster strikes!
+
+Let's say someone accidentally deleted the `company` table:
+
+```bash
+$ kubectl run postgresql-client --rm --tty -i --restart='Never' --namespace postgres-test --image docker.io/bitnamilegacy/postgresql:17.6.0 --env="PGPASSWORD=<db-password>" \
+      --command -- psql --host <rds-instance-endpoint> -U <master-username> -d test -p 5432
+
+test=> DROP TABLE company;
+DROP TABLE
+```
+
+### Restore the Application
+
+To restore the RDS instance from the snapshot, you should use the backup that you created before. An easy way to do this is to leverage `kanctl`, a command-line tool that helps create ActionSets that depend on other ActionSets:
+
+```bash
+$ kanctl --namespace kanister create actionset --action restore --from rds-backup
+actionset restore-rds-backup-6jzt4 created
 
 ## Check status
-$ kubectl --namespace kanister describe actionset restore-backup-glptq-6jzt4
+$ kubectl --namespace kanister describe actionset restore-rds-backup-6jzt4
 ```
 
-Once the ActionSet status is set to "complete", you can see that the data has been successfully restored to the RDS PostgreSQL database instance
+**NOTE:**
 
-To verify, Connect to the RDS PostgreSQL database instance using the command mentioned below.
+The restore action replaces the existing RDS instance: the instance with the identifier stored in the backup artifact is deleted and a new instance with the same identifier is restored from the snapshot, using the security group and DB subnet group captured at backup time. The instance is unavailable during the restore.
 
-In this command `<instance-name>`, `<db-password>`, and `<master-username>` are the details of the RDS instance that we have already created as part of [setup](#create-rds-instance-on-aws)
+Once the ActionSet status is set to "complete", you can verify that the data has been restored by connecting to the RDS instance:
 
 ```bash
-$ kubectl run my-release-postgresql-client --rm --tty -i --restart='Never' --namespace postgres-test --image docker.io/bitnamilegacy/postgresql:17.6.0 --env="PGPASSWORD=<db-password>" --command -- psql --host <instance-name> -U <master-username> -d template1 -p 5432                   
+$ kubectl run postgresql-client --rm --tty -i --restart='Never' --namespace postgres-test --image docker.io/bitnamilegacy/postgresql:17.6.0 --env="PGPASSWORD=<db-password>" \
+      --command -- psql --host <rds-instance-endpoint> -U <master-username> -d test -p 5432
 
-psql (15.1, server 15.2)
-SSL connection (protocol: TLSv1.2, cipher: ECDHE-RSA-AES256-GCM-SHA384, compression: off)
-Type "help" for help.
-
-postgres=> \l
-                                                 List of databases
-   Name    |  Owner   | Encoding |   Collate   |    Ctype    | ICU Locale | Locale Provider |   Access privileges   
------------+----------+----------+-------------+-------------+------------+-----------------+-----------------------
- postgres  | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 |            | libc            | 
- rdsadmin  | rdsadmin | UTF8     | en_US.UTF-8 | en_US.UTF-8 |            | libc            | rdsadmin=CTc/rdsadmin+
-           |          |          |             |             |            |                 | rdstopmgr=Tc/rdsadmin
- template0 | rdsadmin | UTF8     | en_US.UTF-8 | en_US.UTF-8 |            | libc            | =c/rdsadmin          +
-           |          |          |             |             |            |                 | rdsadmin=CTc/rdsadmin
- template1 | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 |            | libc            | postgres=CTc/postgres+
-           |          |          |             |             |            |                 | =c/postgres
- test      | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 |            | libc            | 
-(5 rows)
-
-postgres=# \c test;
-You are now connected to database "test" as user "postgres".
-test=# select * from company;
+test=> select * from company;
  id |  name  | age |                      address                       | salary |         created_at
 ----+--------+-----+----------------------------------------------------+--------+----------------------------
- 10 | Paul   |  32 | California                                         |  20000 | 2019-12-23 07:13:10.459499
- 20 | Omkar  |  32 | California                                         |  20000 | 2019-12-23 07:13:20.953172
- 30 | Prasad |  32 | California                                         |  20000 | 2019-12-23 07:13:29.15668
+ 10 | Paul   |  32 | California                                         |  20000 | 2019-09-16 14:39:36.316065
+ 20 | Omkar  |  32 | California                                         |  20000 | 2019-09-16 14:40:52.952459
+ 30 | Prasad |  32 | California                                         |  20000 | 2019-09-16 14:41:06.433487
 (3 rows)
 ```
 
 ### Delete the Artifacts
 
-The artifacts created by the backup action can be cleaned up using the following command:
+The RDS snapshot created by the backup action can be deleted using the following command:
 
 ```bash
-$ kanctl --namespace kanister create actionset --action delete --from backup-glptq --namespacetargets kanister
-actionset delete-backup-glptq-cq6bw created
+$ kanctl --namespace kanister create actionset --action delete --from rds-backup --namespacetargets kanister
+actionset delete-rds-backup-cq6bw created
 
 # View the status of the ActionSet
-$ kubectl --namespace kanister describe actionset delete-backup-glptq-cq6bw
+$ kubectl --namespace kanister describe actionset delete-rds-backup-cq6bw
 ```
 
 ## Troubleshooting
@@ -305,23 +303,24 @@ $ kubectl describe actionset <actionset-name> -n kanister
 
 ## Cleanup
 
-### Uninstalling the Chart
-
-To uninstall/delete the `my-release` deployment:
+### Delete the RDS instance
 
 ```bash
-
-$ helm delete my-release -n postgres-test
+$ aws rds delete-db-instance --db-instance-identifier <instance-name> --skip-final-snapshot --region <region-name>
 ```
 
 ### Delete CRs
-Remove Blueprint and Profile CR
+Remove Blueprint, Profile CR, ConfigMap and the Kanister Role and RoleBinding
 
 ```bash
-$ kubectl delete blueprints.cr.kanister.io postgres-bp -n kanister
+$ kubectl delete blueprints.cr.kanister.io rds-postgres-bp -n kanister
 
 $ kubectl get profiles.cr.kanister.io -n postgres-test
 NAME               AGE
 s3-profile-7d6wt   17m
-$ kubectl delete profiles.cr.kanister.io ss3-profile-7d6w -n postgres-test
+$ kubectl delete profiles.cr.kanister.io s3-profile-7d6wt -n postgres-test
+
+$ kubectl delete configmap dbconfig -n postgres-test
+
+$ kubectl delete rolebinding,role kanister-rds-read -n postgres-test
 ```
