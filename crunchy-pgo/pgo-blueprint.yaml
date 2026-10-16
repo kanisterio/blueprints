@@ -8,6 +8,7 @@ actions:
       backupInfo:
         keyValue:
           pgoBackupRepo: '{{ .Phases.pgoBackup.Output.pgoBackupRepo }}'
+          pgoBackupLabel: '{{ .Phases.getTimelineInfo.Output.pgoBackupLabel }}'
           pgoBackupTimestamp: '{{ .Phases.getTimelineInfo.Output.pgoBackupTimestamp }}'
           pgoBackupTimelineID: '{{ .Phases.getTimelineInfo.Output.pgoBackupTimelineID }}'
     phases:
@@ -96,24 +97,25 @@ actions:
                   -o jsonpath='{.items[0].metadata.name}')
               psql_exec() { kubectl exec "$primary_pod" -n $ns -c database -- psql -Atc "$1"; }
 
-              # Get current timestamp and timeline ID from postgres
+              # Get the label of the pgBackRest backup that just finished. Restore
+              # uses it with --type=immediate, so it doesn't depend on a commit
+              # being written after the backup. pgBackRest runs one backup per
+              # stanza at a time and lists backups oldest first, so the last
+              # label in the repo is this backup.
+              backup_repo="{{ .Phases.pgoBackup.Output.pgoBackupRepo }}"
+              label=$(kubectl exec "$primary_pod" -n $ns -c database -- \
+                  pgbackrest info --stanza=db --repo="${backup_repo#repo}" --output=json \
+                  | grep -o '"label":"[^"]*"' | tail -n 1 | cut -d'"' -f4)
+              if [ -z "$label" ]; then
+                  >&2 echo "Could not find the pgBackRest backup label in $backup_repo"
+                  exit 1
+              fi
+
+              # Timestamp and timeline ID are kept for reference only
               timestamp=$(psql_exec "select current_timestamp")
               tl_id=$(psql_exec "select timeline_id from pg_control_checkpoint()")
 
-              # Write a commit record after the target time so recovery can stop
-              # there, then switch WAL and wait until that segment is archived.
-              psql_exec "select txid_current()" > /dev/null
-              wal_file=$(psql_exec "select pg_walfile_name(pg_switch_wal())")
-              counter=0
-              until [ "$(psql_exec "select coalesce(last_archived_wal, '') collate \"C\" >= '$wal_file' from pg_stat_archiver")" = "t" ]; do
-                  if [ $counter -ge 60 ]; then
-                      >&2 echo "WAL segment $wal_file was not archived in time"
-                      exit 1
-                  fi
-                  sleep 5
-                  let "counter=$counter+1"
-              done
-
+              kando output pgoBackupLabel "$label"
               kando output pgoBackupTimestamp "$timestamp"
               kando output pgoBackupTimelineID "$tl_id"
   restore:
@@ -142,9 +144,15 @@ actions:
                       enabled: true
                       repoName: "{{ .ArtifactsIn.backupInfo.KeyValue.pgoBackupRepo }}"
                       options:
+                      {{- if index .ArtifactsIn.backupInfo.KeyValue "pgoBackupLabel" }}
+                      - --set={{ index .ArtifactsIn.backupInfo.KeyValue "pgoBackupLabel" }}
+                      - --type=immediate
+                      {{- else }}
+                      # Backups taken before pgoBackupLabel was recorded
                       - --type=time
                       - --target="{{ .ArtifactsIn.backupInfo.KeyValue.pgoBackupTimestamp }}"
                       - --target-timeline="{{ .ArtifactsIn.backupInfo.KeyValue.pgoBackupTimelineID }}"
+                      {{- end }}
               EOM
               )"
               # Trigger restore
