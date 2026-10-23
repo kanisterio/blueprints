@@ -282,6 +282,54 @@ restore-backup-8xk2q-6vbbr   100.00     2026-10-05T09:31:17Z   complete
 
 The restore is an **in-place point-in-time recovery**. PGO stops the cluster's database instances, restores the data to the timestamp recorded during backup, and starts the instances again. Any changes made after the backup are lost.
 
+A point-in-time restore can only stop at the target time once Postgres sees a transaction committed after that time. On quiet databases there may be none, so the backup action writes a commit and switches the WAL file (`pg_switch_wal()`) after recording the timestamp, and waits until that WAL file is archived. Without it, the restore fails with `recovery ended before configured recovery target was reached`.
+
+This approach has limitations:
+
+- It writes to the application database on every backup.
+- The backup can be slow, as it waits up to 5 minutes for the WAL file to be archived, and fails if archiving takes longer.
+
+**Alternative: restore a specific backup set**
+
+As an alternative, you can restore the pgBackRest backup itself instead of a point in time. With `--set=<label> --type=immediate`, recovery stops as soon as the backup is consistent, so no commit after the backup is needed and nothing has to be written to the database during backup. This also works for backups whose restore fails with the error above.
+
+Find the label of the backup to restore. Backups are listed oldest first. Use the repo number from the `pgoBackupRepo` artifact, e.g. `1` for `repo1`:
+
+```bash
+$ PRIMARY_POD=$(kubectl get pods -n pgo-test \
+    -l postgres-operator.crunchydata.com/cluster=hippo,postgres-operator.crunchydata.com/role=master \
+    -o jsonpath='{.items[0].metadata.name}')
+$ kubectl exec -n pgo-test -c database $PRIMARY_POD -- pgbackrest info --stanza=db --repo=1
+```
+
+Then restore that backup set, replacing `<label>` with the backup label (for example `20261015-101500F`):
+
+```bash
+$ kubectl patch postgrescluster hippo -n pgo-test --type merge --patch "$(cat <<EOF
+spec:
+  backups:
+    pgbackrest:
+      restore:
+        enabled: true
+        repoName: repo1
+        options:
+        - --set=<label>
+        - --type=immediate
+EOF
+)"
+
+# Trigger the restore
+$ kubectl annotate postgrescluster hippo -n pgo-test --overwrite \
+    postgres-operator.crunchydata.com/pgbackrest-restore="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# Wait until the restore has finished and succeeded is 1
+$ kubectl get postgrescluster hippo -n pgo-test -o jsonpath='{.status.pgbackrest.restore}'
+
+# Disable the restore spec again so it isn't re-triggered
+$ kubectl patch postgrescluster hippo -n pgo-test --type merge \
+    --patch '{"spec":{"backups":{"pgbackrest":{"restore":{"enabled":false}}}}}'
+```
+
 Once the ActionSet status is set to "complete", you can see that the data has been successfully restored to PostgreSQL
 
 ```bash
